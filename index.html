@@ -19,23 +19,43 @@
         <label for="bpmInput">BPM</label>
         <input id="bpmInput" type="number" min="40" max="240" value="120" />
       </div>
+      <div class="control-row">
+        <label for="stepCountInput">Steps</label>
+        <input id="stepCountInput" type="number" min="4" max="64" value="16" step="1" />
+      </div>
     </section>
 
     <section class="track-setup">
       <div class="track-column">
         <span class="track-label">Track 1</span>
+        <div class="volume-row">
+          <label for="vol0">Vol</label>
+          <input class="volume-input" id="vol0" type="range" data-track="0" min="0" max="1" step="0.01" value="1" />
+        </div>
         <input class="sound-input" type="file" data-track="0" accept="audio/*" />
       </div>
       <div class="track-column">
         <span class="track-label">Track 2</span>
+        <div class="volume-row">
+          <label for="vol1">Vol</label>
+          <input class="volume-input" id="vol1" type="range" data-track="1" min="0" max="1" step="0.01" value="1" />
+        </div>
         <input class="sound-input" type="file" data-track="1" accept="audio/*" />
       </div>
       <div class="track-column">
         <span class="track-label">Track 3</span>
+        <div class="volume-row">
+          <label for="vol2">Vol</label>
+          <input class="volume-input" id="vol2" type="range" data-track="2" min="0" max="1" step="0.01" value="1" />
+        </div>
         <input class="sound-input" type="file" data-track="2" accept="audio/*" />
       </div>
       <div class="track-column">
         <span class="track-label">Track 4</span>
+        <div class="volume-row">
+          <label for="vol3">Vol</label>
+          <input class="volume-input" id="vol3" type="range" data-track="3" min="0" max="1" step="0.01" value="1" />
+        </div>
         <input class="sound-input" type="file" data-track="3" accept="audio/*" />
       </div>
     </section>

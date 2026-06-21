@@ -9,9 +9,11 @@ const bpmInput = document.getElementById('bpmInput');
 const stepCountInput = document.getElementById('stepCountInput');
 const sequencerGrid = document.getElementById('sequencerGrid');
 const soundInputs = document.querySelectorAll('.sound-input');
+const volumeInputs = document.querySelectorAll('.volume-input');
 
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+let audioContext = null;
 const trackBuffers = Array(NUM_TRACKS).fill(null);
+const trackGains = Array(NUM_TRACKS).fill(null);
 let activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
 
 let isPlaying = false;
@@ -19,6 +21,17 @@ let currentStep = 0;
 let nextNoteTime = 0;
 let schedulerId = null;
 const scheduledHighlightTimeouts = [];
+
+function getAudioContext() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < NUM_TRACKS; i += 1) {
+      trackGains[i] = audioContext.createGain();
+      trackGains[i].connect(audioContext.destination);
+    }
+  }
+  return audioContext;
+}
 
 function createGrid() {
   for (let stepIndex = 0; stepIndex < numSteps; stepIndex += 1) {
@@ -34,6 +47,9 @@ function createGrid() {
       button.className = 'step-button';
       button.dataset.track = String(trackIndex);
       button.dataset.step = String(stepIndex);
+      if (activeSteps[trackIndex][stepIndex]) {
+        button.classList.add('active');
+      }
       button.addEventListener('click', () => toggleStep(trackIndex, stepIndex, button));
       sequencerGrid.appendChild(button);
     }
@@ -45,46 +61,58 @@ function toggleStep(track, step, button) {
   button.classList.toggle('active', activeSteps[track][step]);
 }
 
-function loadTrackBuffer(trackIndex, arrayBuffer) {
-  return audioContext.decodeAudioData(arrayBuffer);
+function loadTrackBuffer(arrayBuffer) {
+  return getAudioContext().decodeAudioData(arrayBuffer);
+}
+
+function getTrackLabel(input) {
+  return input.closest('.track-column')?.querySelector('.track-label');
 }
 
 function handleSoundFile(event) {
   const input = event.currentTarget;
   const trackIndex = Number(input.dataset.track);
   const file = input.files?.[0];
+  const label = getTrackLabel(input);
 
   if (!file) {
     trackBuffers[trackIndex] = null;
+    label?.classList.remove('loaded', 'loading', 'error');
     return;
   }
+
+  label?.classList.remove('loaded', 'error');
+  label?.classList.add('loading');
 
   const reader = new FileReader();
   reader.onload = async () => {
     try {
-      const audioBuffer = await loadTrackBuffer(trackIndex, reader.result);
+      const audioBuffer = await loadTrackBuffer(reader.result);
       trackBuffers[trackIndex] = audioBuffer;
-      input.previousElementSibling?.classList.add('loaded');
+      label?.classList.remove('loading', 'error');
+      label?.classList.add('loaded');
     } catch (error) {
       console.error('Audio decode failed for track', trackIndex, error);
       trackBuffers[trackIndex] = null;
+      label?.classList.remove('loading', 'loaded');
+      label?.classList.add('error');
     }
   };
   reader.readAsArrayBuffer(file);
 }
 
-function createBufferSource(buffer, when) {
-  const source = audioContext.createBufferSource();
+function createBufferSource(buffer, when, trackIndex) {
+  const ctx = getAudioContext();
+  const source = ctx.createBufferSource();
   source.buffer = buffer;
-  source.connect(audioContext.destination);
+  source.connect(trackGains[trackIndex]);
   source.start(when);
-  return source;
 }
 
 function scheduleStep(step, time) {
   for (let trackIndex = 0; trackIndex < NUM_TRACKS; trackIndex += 1) {
     if (activeSteps[trackIndex][step] && trackBuffers[trackIndex]) {
-      createBufferSource(trackBuffers[trackIndex], time);
+      createBufferSource(trackBuffers[trackIndex], time, trackIndex);
     }
   }
 }
@@ -115,12 +143,17 @@ function updatePlayheadHighlight(step) {
 }
 
 function scheduler() {
-  while (nextNoteTime < audioContext.currentTime + SCHEDULE_AHEAD_SECONDS) {
+  const ctx = getAudioContext();
+  while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD_SECONDS) {
     const stepToSchedule = currentStep;
     scheduleStep(stepToSchedule, nextNoteTime);
 
-    const timeUntilStepMs = Math.max(0, (nextNoteTime - audioContext.currentTime) * 1000);
-    const timeoutId = setTimeout(() => updatePlayheadHighlight(stepToSchedule), timeUntilStepMs);
+    const timeUntilStepMs = Math.max(0, (nextNoteTime - ctx.currentTime) * 1000);
+    const timeoutId = setTimeout(() => {
+      updatePlayheadHighlight(stepToSchedule);
+      const idx = scheduledHighlightTimeouts.indexOf(timeoutId);
+      if (idx !== -1) scheduledHighlightTimeouts.splice(idx, 1);
+    }, timeUntilStepMs);
     scheduledHighlightTimeouts.push(timeoutId);
 
     nextStep();
@@ -128,14 +161,15 @@ function scheduler() {
 }
 
 function startSequencer() {
-  if (audioContext.state === 'suspended') {
-    audioContext.resume();
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') {
+    ctx.resume();
   }
 
   isPlaying = true;
   playStopBtn.textContent = 'Stop';
   currentStep = 0;
-  nextNoteTime = audioContext.currentTime + 0.05;
+  nextNoteTime = ctx.currentTime + 0.05;
   updatePlayheadHighlight(currentStep);
   schedulerId = setInterval(scheduler, LOOKAHEAD_INTERVAL_MS);
 }
@@ -162,6 +196,12 @@ function togglePlay() {
   }
 }
 
+function resetPlaybackState() {
+  currentStep = 0;
+  nextNoteTime = 0;
+  document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
+}
+
 function clearSteps() {
   activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
   document.querySelectorAll('.step-button.active').forEach((button) => {
@@ -173,6 +213,7 @@ function clearSoundFiles() {
   soundInputs.forEach((input, index) => {
     input.value = '';
     trackBuffers[index] = null;
+    getTrackLabel(input)?.classList.remove('loaded', 'loading', 'error');
   });
 }
 
@@ -183,17 +224,16 @@ function resetSequencer() {
 
   clearSteps();
   clearSoundFiles();
-  currentStep = 0;
-  nextNoteTime = 0;
-  document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
+  resetPlaybackState();
 }
 
 function rebuildGrid() {
+  const prevSteps = activeSteps;
+  activeSteps = Array.from({ length: NUM_TRACKS }, (_, trackIndex) =>
+    Array.from({ length: numSteps }, (_, stepIndex) => prevSteps[trackIndex]?.[stepIndex] ?? false)
+  );
   sequencerGrid.innerHTML = '';
-  clearSteps();
-  currentStep = 0;
-  nextNoteTime = 0;
-  document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
+  resetPlaybackState();
   createGrid();
 }
 
@@ -211,5 +251,13 @@ playStopBtn.addEventListener('click', togglePlay);
 resetBtn.addEventListener('click', resetSequencer);
 stepCountInput.addEventListener('change', handleStepCountChange);
 soundInputs.forEach((input) => input.addEventListener('change', handleSoundFile));
+volumeInputs.forEach((input) => {
+  input.addEventListener('input', () => {
+    const trackIndex = Number(input.dataset.track);
+    if (trackGains[trackIndex]) {
+      trackGains[trackIndex].gain.value = Number(input.value);
+    }
+  });
+});
 
 createGrid();
