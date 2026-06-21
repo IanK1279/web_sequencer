@@ -9,6 +9,16 @@ let numSteps = 16;
 const LOOKAHEAD_INTERVAL_MS = 25;
 const SCHEDULE_AHEAD_SECONDS = 0.2;
 
+// ─── Default Sounds ───────────────────────────────────────────────────────────
+// Sounds to auto-load on launch. Each entry maps to a track by index.
+// null means that track starts empty. Files are fetched relative to index.html.
+const DEFAULT_SOUNDS = [
+  { path: 'sounds/kick.wav', label: 'Kick' },
+  { path: 'sounds/snare.wav', label: 'Snare' },
+  { path: 'sounds/hh.wav', label: 'Hi-Hat' },
+  null,
+];
+
 // ─── DOM References ───────────────────────────────────────────────────────────
 // Grab all the HTML elements we need to read or update at runtime.
 const playStopBtn = document.getElementById('playStopBtn');
@@ -107,9 +117,39 @@ function getTrackLabel(input) {
   return input.closest('.track-column')?.querySelector('.track-label');
 }
 
+// Auto-loads default sounds from the sounds/ folder on launch using fetch.
+// Each track's label is updated to show the sound name. If a fetch fails (e.g.
+// running from file:// instead of a local server), the track silently stays empty.
+async function loadDefaultSounds() {
+  for (let trackIndex = 0; trackIndex < DEFAULT_SOUNDS.length; trackIndex += 1) {
+    const def = DEFAULT_SOUNDS[trackIndex];
+    if (!def) continue;
+
+    const input = soundInputs[trackIndex];
+    const label = getTrackLabel(input);
+
+    if (label) label.textContent = def.label;
+    label?.classList.add('loading');
+
+    try {
+      const response = await fetch(def.path);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await loadTrackBuffer(arrayBuffer);
+      trackBuffers[trackIndex] = audioBuffer;
+      label?.classList.remove('loading', 'error');
+      label?.classList.add('loaded');
+    } catch (error) {
+      console.warn('Could not auto-load default sound for track', trackIndex, error);
+      if (label) label.textContent = `Track ${trackIndex + 1}`;
+      label?.classList.remove('loading');
+    }
+  }
+}
+
 // Handles a file being selected for a track. Reads the file as raw bytes, decodes
 // it into an AudioBuffer, and stores it in trackBuffers. The label updates to show
-// loading/loaded/error state during the process.
+// the chosen filename and loading/loaded/error state during the process.
 function handleSoundFile(event) {
   const input = event.currentTarget;
   const trackIndex = Number(input.dataset.track);
@@ -118,10 +158,13 @@ function handleSoundFile(event) {
 
   if (!file) {
     trackBuffers[trackIndex] = null;
+    if (label) label.textContent = `Track ${trackIndex + 1}`;
     label?.classList.remove('loaded', 'loading', 'error');
     return;
   }
 
+  // Show the filename (minus extension) as the new label.
+  if (label) label.textContent = file.name.replace(/\.[^.]+$/, '');
   label?.classList.remove('loaded', 'error');
   label?.classList.add('loading');
 
@@ -276,12 +319,14 @@ function clearSteps() {
   });
 }
 
-// Clears all loaded audio files and resets track label status indicators.
+// Clears all loaded audio files, restores default track labels, and resets status indicators.
 function clearSoundFiles() {
   soundInputs.forEach((input, index) => {
     input.value = '';
     trackBuffers[index] = null;
-    getTrackLabel(input)?.classList.remove('loaded', 'loading', 'error');
+    const label = getTrackLabel(input);
+    if (label) label.textContent = `Track ${index + 1}`;
+    label?.classList.remove('loaded', 'loading', 'error');
   });
 }
 
@@ -335,3 +380,4 @@ volumeInputs.forEach((input) => {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 createGrid();
+loadDefaultSounds();
