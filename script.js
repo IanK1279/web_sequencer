@@ -4,6 +4,7 @@ const LOOKAHEAD_INTERVAL_MS = 25;
 const SCHEDULE_AHEAD_SECONDS = 0.2;
 
 const playStopBtn = document.getElementById('playStopBtn');
+const resetBtn = document.getElementById('resetBtn');
 const bpmInput = document.getElementById('bpmInput');
 const sequencerGrid = document.getElementById('sequencerGrid');
 const soundInputs = document.querySelectorAll('.sound-input');
@@ -16,6 +17,7 @@ let isPlaying = false;
 let currentStep = 0;
 let nextNoteTime = 0;
 let schedulerId = null;
+const scheduledHighlightTimeouts = [];
 
 function createGrid() {
   for (let stepIndex = 0; stepIndex < NUM_STEPS; stepIndex += 1) {
@@ -96,14 +98,12 @@ function nextStep() {
 }
 
 function updatePlayheadHighlight(step) {
+  document.querySelectorAll('.step-row-current').forEach((element) => {
+    element.classList.remove('step-row-current');
+  });
+
   const rowStartIndex = step * (NUM_TRACKS + 1);
   const rowEndIndex = rowStartIndex + NUM_TRACKS + 1;
-
-  for (let i = 0; i < sequencerGrid.children.length; i += 1) {
-    const element = sequencerGrid.children[i];
-    element.parentElement?.classList?.remove('step-row-current');
-    element.classList.toggle('step-row-current', false);
-  }
 
   for (let idx = rowStartIndex; idx < rowEndIndex; idx += 1) {
     const element = sequencerGrid.children[idx];
@@ -115,8 +115,13 @@ function updatePlayheadHighlight(step) {
 
 function scheduler() {
   while (nextNoteTime < audioContext.currentTime + SCHEDULE_AHEAD_SECONDS) {
-    scheduleStep(currentStep, nextNoteTime);
-    updatePlayheadHighlight(currentStep);
+    const stepToSchedule = currentStep;
+    scheduleStep(stepToSchedule, nextNoteTime);
+
+    const timeUntilStepMs = Math.max(0, (nextNoteTime - audioContext.currentTime) * 1000);
+    const timeoutId = setTimeout(() => updatePlayheadHighlight(stepToSchedule), timeUntilStepMs);
+    scheduledHighlightTimeouts.push(timeoutId);
+
     nextStep();
   }
 }
@@ -141,6 +146,8 @@ function stopSequencer() {
     clearInterval(schedulerId);
     schedulerId = null;
   }
+  scheduledHighlightTimeouts.forEach(clearTimeout);
+  scheduledHighlightTimeouts.length = 0;
   document.querySelectorAll('.step-row-current').forEach((el) => {
     el.classList.remove('step-row-current');
   });
@@ -154,7 +161,34 @@ function togglePlay() {
   }
 }
 
+function clearSteps() {
+  activeSteps.forEach((trackSteps) => trackSteps.fill(false));
+  document.querySelectorAll('.step-button.active').forEach((button) => {
+    button.classList.remove('active');
+  });
+}
+
+function clearSoundFiles() {
+  soundInputs.forEach((input, index) => {
+    input.value = '';
+    trackBuffers[index] = null;
+  });
+}
+
+function resetSequencer() {
+  if (isPlaying) {
+    stopSequencer();
+  }
+
+  clearSteps();
+  clearSoundFiles();
+  currentStep = 0;
+  nextNoteTime = 0;
+  document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
+}
+
 playStopBtn.addEventListener('click', togglePlay);
+resetBtn.addEventListener('click', resetSequencer);
 soundInputs.forEach((input) => input.addEventListener('change', handleSoundFile));
 
 createGrid();
