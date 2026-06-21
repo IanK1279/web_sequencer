@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Step Sequencer v1</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <h1>Step Sequencer v1</h1>
+
+    <section class="controls">
+      <div class="control-row">
+        <button id="playStopBtn" type="button">Play</button>
+      </div>
+      <div class="control-row">
+        <label for="bpmInput">BPM</label>
+        <input id="bpmInput" type="number" min="40" max="240" value="120" />
+      </div>
+    </section>
+
+    <section class="track-setup">
+      <div class="track-column">
+        <span class="track-label">Track 1</span>
+        <input class="sound-input" type="file" data-track="0" accept="audio/*" />
+      </div>
+      <div class="track-column">
+        <span class="track-label">Track 2</span>
+        <input class="sound-input" type="file" data-track="1" accept="audio/*" />
+      </div>
+      <div class="track-column">
+        <span class="track-label">Track 3</span>
+        <input class="sound-input" type="file" data-track="2" accept="audio/*" />
+      </div>
+      <div class="track-column">
+        <span class="track-label">Track 4</span>
+        <input class="sound-input" type="file" data-track="3" accept="audio/*" />
+      </div>
+    </section>
+
+    <section class="grid-section">
+      <div class="grid-header">
+        <div class="grid-head-cell">Step</div>
+        <div class="grid-head-cell">Track 1</div>
+        <div class="grid-head-cell">Track 2</div>
+        <div class="grid-head-cell">Track 3</div>
+        <div class="grid-head-cell">Track 4</div>
+      </div>
+      <div id="sequencerGrid" class="sequencer-grid"></div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
