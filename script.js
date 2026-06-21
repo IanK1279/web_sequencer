@@ -1,8 +1,16 @@
+// ─── Constants ────────────────────────────────────────────────────────────────
+// NUM_TRACKS: how many instrument rows exist in the grid (fixed at 4).
+// LOOKAHEAD_INTERVAL_MS: how often (in ms) the scheduler function runs via setInterval.
+// SCHEDULE_AHEAD_SECONDS: how far into the future the scheduler queues audio events.
+//   Scheduling ahead gives the browser breathing room — if we only scheduled the
+//   very next step, a slow JS frame could cause audio to drop out.
 const NUM_TRACKS = 4;
 let numSteps = 16;
 const LOOKAHEAD_INTERVAL_MS = 25;
 const SCHEDULE_AHEAD_SECONDS = 0.2;
 
+// ─── DOM References ───────────────────────────────────────────────────────────
+// Grab all the HTML elements we need to read or update at runtime.
 const playStopBtn = document.getElementById('playStopBtn');
 const resetBtn = document.getElementById('resetBtn');
 const bpmInput = document.getElementById('bpmInput');
@@ -11,17 +19,35 @@ const sequencerGrid = document.getElementById('sequencerGrid');
 const soundInputs = document.querySelectorAll('.sound-input');
 const volumeInputs = document.querySelectorAll('.volume-input');
 
+// ─── Audio State ──────────────────────────────────────────────────────────────
+// audioContext: the Web Audio API entry point — all audio routing and timing goes
+//   through this. Created lazily (on first play/file load) because browsers block
+//   AudioContext creation before the user has interacted with the page.
+// trackBuffers: holds the decoded audio data for each track. null = no file loaded.
+// trackGains: one GainNode per track, used to control per-track volume.
 let audioContext = null;
 const trackBuffers = Array(NUM_TRACKS).fill(null);
 const trackGains = Array(NUM_TRACKS).fill(null);
-let activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
 
+// ─── Sequencer State ──────────────────────────────────────────────────────────
+// activeSteps: 2D array [track][step] → true if that cell is toggled on.
+// currentStep: which step the sequencer is currently on (0-indexed).
+// nextNoteTime: the Web Audio clock time (in seconds) when the next step should fire.
+//   This uses audioContext.currentTime, which is a high-precision hardware clock —
+//   much more accurate than Date.now() or setTimeout for audio scheduling.
+// scheduledHighlightTimeouts: tracks pending setTimeout IDs so we can cancel them
+//   when the sequencer stops, and prune them as they fire to prevent the array growing.
+let activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
 let isPlaying = false;
 let currentStep = 0;
 let nextNoteTime = 0;
 let schedulerId = null;
 const scheduledHighlightTimeouts = [];
 
+// ─── AudioContext Factory ─────────────────────────────────────────────────────
+// Creates the AudioContext and one GainNode per track on first call, then returns
+// the same instance every time after that. GainNodes sit between each track's
+// audio source and the speakers, letting us scale volume independently per track.
 function getAudioContext() {
   if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -33,6 +59,11 @@ function getAudioContext() {
   return audioContext;
 }
 
+// ─── Grid Builder ─────────────────────────────────────────────────────────────
+// Populates the sequencer grid with one row per step. Each row contains a step
+// number label followed by one button per track. Buttons are pre-marked active
+// if activeSteps already has them toggled (important after a step-count change
+// where we preserve the existing pattern).
 function createGrid() {
   for (let stepIndex = 0; stepIndex < numSteps; stepIndex += 1) {
     const stepNumberCell = document.createElement('div');
@@ -56,19 +87,29 @@ function createGrid() {
   }
 }
 
+// Flips the active state of one cell and keeps the button's CSS class in sync.
 function toggleStep(track, step, button) {
   activeSteps[track][step] = !activeSteps[track][step];
   button.classList.toggle('active', activeSteps[track][step]);
 }
 
+// ─── Audio File Loading ───────────────────────────────────────────────────────
+// decodeAudioData converts raw file bytes into a floating-point AudioBuffer that
+// the Web Audio API can play back. This must happen before playback, and is async
+// because decoding can take a moment for large files.
 function loadTrackBuffer(arrayBuffer) {
   return getAudioContext().decodeAudioData(arrayBuffer);
 }
 
+// Looks up the track label element within the same .track-column as the file input.
+// Used to show load/error status without hardcoding DOM structure assumptions.
 function getTrackLabel(input) {
   return input.closest('.track-column')?.querySelector('.track-label');
 }
 
+// Handles a file being selected for a track. Reads the file as raw bytes, decodes
+// it into an AudioBuffer, and stores it in trackBuffers. The label updates to show
+// loading/loaded/error state during the process.
 function handleSoundFile(event) {
   const input = event.currentTarget;
   const trackIndex = Number(input.dataset.track);
@@ -101,6 +142,10 @@ function handleSoundFile(event) {
   reader.readAsArrayBuffer(file);
 }
 
+// ─── Audio Playback ───────────────────────────────────────────────────────────
+// Creates a one-shot buffer source for a single hit and connects it through the
+// track's gain node. BufferSourceNodes are single-use — you create a new one each
+// time a step fires.
 function createBufferSource(buffer, when, trackIndex) {
   const ctx = getAudioContext();
   const source = ctx.createBufferSource();
@@ -109,6 +154,7 @@ function createBufferSource(buffer, when, trackIndex) {
   source.start(when);
 }
 
+// Fires the audio for all active tracks on a given step at the scheduled time.
 function scheduleStep(step, time) {
   for (let trackIndex = 0; trackIndex < NUM_TRACKS; trackIndex += 1) {
     if (activeSteps[trackIndex][step] && trackBuffers[trackIndex]) {
@@ -117,6 +163,8 @@ function scheduleStep(step, time) {
   }
 }
 
+// Advances nextNoteTime and currentStep by one step's worth of time.
+// Step duration is derived from BPM: each beat is divided into 4 steps (16th notes).
 function nextStep() {
   const bpm = Number(bpmInput.value) || 120;
   const secondsPerBeat = 60 / bpm;
@@ -126,6 +174,10 @@ function nextStep() {
   currentStep = (currentStep + 1) % numSteps;
 }
 
+// ─── Playhead Highlight ───────────────────────────────────────────────────────
+// Updates the visual highlight to show which step row is currently playing.
+// The grid stores all cells as a flat list, so the row for step N starts at
+// index N * (NUM_TRACKS + 1) — one label cell plus one button per track.
 function updatePlayheadHighlight(step) {
   document.querySelectorAll('.step-row-current').forEach((element) => {
     element.classList.remove('step-row-current');
@@ -142,6 +194,13 @@ function updatePlayheadHighlight(step) {
   }
 }
 
+// ─── Scheduler ────────────────────────────────────────────────────────────────
+// The core timing loop. Runs every LOOKAHEAD_INTERVAL_MS via setInterval and
+// schedules any steps that fall within the next SCHEDULE_AHEAD_SECONDS window.
+// Audio is scheduled on the precise hardware clock (ctx.currentTime) well in
+// advance, while a matching setTimeout triggers the visual highlight at roughly
+// the right wall-clock moment. This split keeps audio tight even if the JS thread
+// is briefly busy — audio scheduling can't be dropped by a slow frame.
 function scheduler() {
   const ctx = getAudioContext();
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD_SECONDS) {
@@ -151,6 +210,7 @@ function scheduler() {
     const timeUntilStepMs = Math.max(0, (nextNoteTime - ctx.currentTime) * 1000);
     const timeoutId = setTimeout(() => {
       updatePlayheadHighlight(stepToSchedule);
+      // Remove this timeout from the tracking array once it has fired.
       const idx = scheduledHighlightTimeouts.indexOf(timeoutId);
       if (idx !== -1) scheduledHighlightTimeouts.splice(idx, 1);
     }, timeUntilStepMs);
@@ -160,8 +220,10 @@ function scheduler() {
   }
 }
 
+// ─── Playback Controls ────────────────────────────────────────────────────────
 function startSequencer() {
   const ctx = getAudioContext();
+  // Browsers suspend the AudioContext until a user gesture — resume it if needed.
   if (ctx.state === 'suspended') {
     ctx.resume();
   }
@@ -169,6 +231,7 @@ function startSequencer() {
   isPlaying = true;
   playStopBtn.textContent = 'Stop';
   currentStep = 0;
+  // Start slightly in the future so the first step has time to be scheduled cleanly.
   nextNoteTime = ctx.currentTime + 0.05;
   updatePlayheadHighlight(currentStep);
   schedulerId = setInterval(scheduler, LOOKAHEAD_INTERVAL_MS);
@@ -181,6 +244,7 @@ function stopSequencer() {
     clearInterval(schedulerId);
     schedulerId = null;
   }
+  // Cancel any highlight timeouts that haven't fired yet.
   scheduledHighlightTimeouts.forEach(clearTimeout);
   scheduledHighlightTimeouts.length = 0;
   document.querySelectorAll('.step-row-current').forEach((el) => {
@@ -196,12 +260,15 @@ function togglePlay() {
   }
 }
 
+// ─── Reset Helpers ────────────────────────────────────────────────────────────
+// Shared cleanup used by both resetSequencer and rebuildGrid.
 function resetPlaybackState() {
   currentStep = 0;
   nextNoteTime = 0;
   document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
 }
 
+// Clears all active step toggles in both the data array and the DOM.
 function clearSteps() {
   activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
   document.querySelectorAll('.step-button.active').forEach((button) => {
@@ -209,6 +276,7 @@ function clearSteps() {
   });
 }
 
+// Clears all loaded audio files and resets track label status indicators.
 function clearSoundFiles() {
   soundInputs.forEach((input, index) => {
     input.value = '';
@@ -217,6 +285,7 @@ function clearSoundFiles() {
   });
 }
 
+// Full reset: stops playback, clears the grid pattern, unloads all audio files.
 function resetSequencer() {
   if (isPlaying) {
     stopSequencer();
@@ -227,6 +296,9 @@ function resetSequencer() {
   resetPlaybackState();
 }
 
+// ─── Step Count Change ────────────────────────────────────────────────────────
+// Rebuilds the grid DOM for a new step count while preserving the existing pattern.
+// Steps that exist in the new count keep their state; extra steps are dropped.
 function rebuildGrid() {
   const prevSteps = activeSteps;
   activeSteps = Array.from({ length: NUM_TRACKS }, (_, trackIndex) =>
@@ -247,6 +319,7 @@ function handleStepCountChange() {
   rebuildGrid();
 }
 
+// ─── Event Listeners ──────────────────────────────────────────────────────────
 playStopBtn.addEventListener('click', togglePlay);
 resetBtn.addEventListener('click', resetSequencer);
 stepCountInput.addEventListener('change', handleStepCountChange);
@@ -260,4 +333,5 @@ volumeInputs.forEach((input) => {
   });
 });
 
+// ─── Init ─────────────────────────────────────────────────────────────────────
 createGrid();
