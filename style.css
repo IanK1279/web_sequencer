@@ -57,6 +57,22 @@ input[type="file"] {
   font: inherit;
 }
 
+.track-setup {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+}
+
+.track-column {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sound-input {
+  width: 100%;
+  min-width: 0;
+}
+
 button {
   cursor: pointer;
   min-width: 100px;
@@ -130,17 +146,26 @@ button:hover {
   color: #fff;
 }
 
-.step-row-current .step-label,
-.step-row-current .step-button {
-  border-color: #7a7aff;
+.step-row-current {
+  background: #1c1c24;
 }
 
 .step-row-current .step-label {
   background: #24242f;
+  border-color: #7a7aff;
 }
 
-.step-row-current .step-button:not(.active) {
-  background: #2a2a3f;
+.step-row-current .step-button {
+  border-color: #7a7aff;
+}
+
+.step-row-current .step-button.active {
+  background: #7a7aff;
+  color: #fff;
+}
+
+.sequencer-grid > .step-label:nth-child(20n+1) {
+  background: #24242f;
 }
 
 @media (max-width: 720px) {
