@@ -1,17 +1,18 @@
 const NUM_TRACKS = 4;
-const NUM_STEPS = 16;
+let numSteps = 16;
 const LOOKAHEAD_INTERVAL_MS = 25;
 const SCHEDULE_AHEAD_SECONDS = 0.2;
 
 const playStopBtn = document.getElementById('playStopBtn');
 const resetBtn = document.getElementById('resetBtn');
 const bpmInput = document.getElementById('bpmInput');
+const stepCountInput = document.getElementById('stepCountInput');
 const sequencerGrid = document.getElementById('sequencerGrid');
 const soundInputs = document.querySelectorAll('.sound-input');
 
 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 const trackBuffers = Array(NUM_TRACKS).fill(null);
-const activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(NUM_STEPS).fill(false));
+let activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
 
 let isPlaying = false;
 let currentStep = 0;
@@ -20,7 +21,7 @@ let schedulerId = null;
 const scheduledHighlightTimeouts = [];
 
 function createGrid() {
-  for (let stepIndex = 0; stepIndex < NUM_STEPS; stepIndex += 1) {
+  for (let stepIndex = 0; stepIndex < numSteps; stepIndex += 1) {
     const stepNumberCell = document.createElement('div');
     stepNumberCell.className = 'step-label';
     stepNumberCell.textContent = String(stepIndex + 1).padStart(2, '0');
@@ -94,7 +95,7 @@ function nextStep() {
   const secondsPerStep = secondsPerBeat / 4;
 
   nextNoteTime += secondsPerStep;
-  currentStep = (currentStep + 1) % NUM_STEPS;
+  currentStep = (currentStep + 1) % numSteps;
 }
 
 function updatePlayheadHighlight(step) {
@@ -162,7 +163,7 @@ function togglePlay() {
 }
 
 function clearSteps() {
-  activeSteps.forEach((trackSteps) => trackSteps.fill(false));
+  activeSteps = Array.from({ length: NUM_TRACKS }, () => Array(numSteps).fill(false));
   document.querySelectorAll('.step-button.active').forEach((button) => {
     button.classList.remove('active');
   });
@@ -187,8 +188,28 @@ function resetSequencer() {
   document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
 }
 
+function rebuildGrid() {
+  sequencerGrid.innerHTML = '';
+  clearSteps();
+  currentStep = 0;
+  nextNoteTime = 0;
+  document.querySelectorAll('.step-row-current').forEach((el) => el.classList.remove('step-row-current'));
+  createGrid();
+}
+
+function handleStepCountChange() {
+  const requestedSteps = Number(stepCountInput.value) || 16;
+  numSteps = Math.min(64, Math.max(4, requestedSteps));
+  stepCountInput.value = numSteps;
+  if (isPlaying) {
+    stopSequencer();
+  }
+  rebuildGrid();
+}
+
 playStopBtn.addEventListener('click', togglePlay);
 resetBtn.addEventListener('click', resetSequencer);
+stepCountInput.addEventListener('change', handleStepCountChange);
 soundInputs.forEach((input) => input.addEventListener('change', handleSoundFile));
 
 createGrid();
